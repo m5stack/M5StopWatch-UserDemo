@@ -158,6 +158,7 @@ public:
     /* ---------------------------------- Power --------------------------------- */
     uint8_t getBatteryLevel();
     bool isBatteryCharging(bool strict = false);
+    void setPowerLed(bool enabled);
 
     /* --------------------------------- Display -------------------------------- */
     void setBackLightBrightness(int brightness, bool saveToSettings = false);

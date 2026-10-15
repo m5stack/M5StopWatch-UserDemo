@@ -165,6 +165,10 @@ void Hal::display_init()
 {
     mclog::tagInfo(_tag, "display init");
 
+    // The AMOLED itself is the primary visible power indication. Keep the
+    // separate PMIC power LED dark whenever the display is about to be used.
+    setPowerLed(false);
+
     _display = std::make_unique<M5StopWatch>();
     if (!_display->init()) {
         mclog::tagError(_tag, "display init failed");
@@ -204,7 +208,16 @@ void Hal::setBackLightBrightness(int brightness, bool saveToSettings)
     _bl_brightness = uitk::clamp(brightness, 0, 100);
 
     int set_target = uitk::map_range(_bl_brightness, 0, 100, 0, 255);
+
+    // Never illuminate the redundant power LED while the AMOLED is on. Turn
+    // it back on only when brightness is explicitly set to zero.
+    if (_bl_brightness > 0) {
+        setPowerLed(false);
+    }
     _display->setBrightness(set_target);
+    if (_bl_brightness == 0) {
+        setPowerLed(true);
+    }
 
     if (saveToSettings) {
         Settings settings(std::string(Hal::SettingsNs), true);
@@ -282,10 +295,14 @@ static void lvgl_rtos_task(void *pvParameter)
     (void)pvParameter;
     while (1) {
         if (_lvgl_update_enabled && pdTRUE == xSemaphoreTake(xGuiSemaphore, portMAX_DELAY)) {
-            lv_timer_handler();
+            // Recheck after taking the mutex. stopLvglUpdate() may have been
+            // called while this task was waiting for an in-flight UI update.
+            if (_lvgl_update_enabled) {
+                lv_timer_handler();
+            }
             xSemaphoreGive(xGuiSemaphore);
         }
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(2));
     }
 }
 

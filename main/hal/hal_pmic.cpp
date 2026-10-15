@@ -136,6 +136,13 @@ bool Hal::pmic_get_pwr_btn_state()
     return result;
 }
 
+void Hal::setPowerLed(bool enabled)
+{
+    if (_pm1) {
+        _pm1->setLedEnLevel(enabled);
+    }
+}
+
 uint8_t Hal::getBatteryLevel()
 {
     std::lock_guard<std::mutex> lock(_bat_level_mutex);

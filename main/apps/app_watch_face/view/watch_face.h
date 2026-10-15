@@ -149,7 +149,15 @@ private:
     bool _gesture_pressing          = false;
     lv_point_t _gesture_start_point = {0, 0};
     lv_point_t _gesture_last_point  = {0, 0};
+    float _gesture_start_orientation_degrees = 0.0f;
 
+    float _orientation_filtered_x = 0.0f;
+    float _orientation_filtered_y = -1.0f;
+    float _orientation_angle_degrees = 0.0f;
+    uint32_t _orientation_last_tick = 0;
+    bool _orientation_initialized = false;
+
+    void update_orientation();
     void update_gesture();
 };
 

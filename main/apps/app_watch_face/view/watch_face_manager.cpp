@@ -7,13 +7,22 @@
 #include <hal/hal.h>
 #include <string_view>
 #include <mooncake_log.h>
+#include <cmath>
 
 using namespace view;
 using namespace uitk;
 using namespace uitk::lvgl_cpp;
 
-static const std::string_view _tag         = "WatchFaceManager";
-static constexpr int _gesture_min_distance = 60;
+static const std::string_view _tag          = "WatchFaceManager";
+static constexpr int _gesture_min_distance    = 60;
+static constexpr int _panel_size              = 466;
+static constexpr uint32_t _orientation_period_ms = 1;
+static constexpr float _orientation_min_planar_g = 0.30f;
+static constexpr float _orientation_filter_alpha = 0.50f;
+static constexpr float _orientation_deadband_degrees = 0.25f;
+static constexpr float _pi                    = 3.14159265358979323846f;
+static constexpr float _radians_to_degrees    = 180.0f / _pi;
+static constexpr float _degrees_to_radians    = _pi / 180.0f;
 
 WatchFaceManager::~WatchFaceManager()
 {
@@ -29,12 +38,26 @@ void WatchFaceManager::init()
     mclog::tagInfo(_tag, "init");
 
     _panel = std::make_unique<Container>(lv_screen_active());
-    _panel->setSize(466, 466);
+    _panel->align(LV_ALIGN_CENTER, 0, 0);
+    _panel->setSize(_panel_size, _panel_size);
     _panel->setBgColor(lv_color_black());
     _panel->setPaddingAll(0);
     _panel->setBorderWidth(0);
     _panel->setRadius(0);
     _panel->removeFlag(LV_OBJ_FLAG_SCROLLABLE);
+
+    // Rotate the entire watch-face tree around the physical centre of the
+    // circular display. Individual watch faces therefore need no orientation
+    // awareness of their own.
+    lv_obj_set_style_transform_pivot_x(_panel->get(), _panel_size / 2, LV_PART_MAIN);
+    lv_obj_set_style_transform_pivot_y(_panel->get(), _panel_size / 2, LV_PART_MAIN);
+    lv_obj_set_style_transform_rotation(_panel->get(), 0, LV_PART_MAIN);
+
+    _orientation_filtered_x = 0.0f;
+    _orientation_filtered_y = -1.0f;
+    _orientation_angle_degrees = 0.0f;
+    _orientation_last_tick = 0;
+    _orientation_initialized = false;
 
     // Register available watch faces here.
     _watch_faces.push_back(std::make_unique<WatchFaceClassic>());
@@ -54,6 +77,7 @@ void WatchFaceManager::update()
         return;
     }
 
+    update_orientation();
     update_gesture();
 
     if (_next_index >= 0 && _next_index != _current_index) {
@@ -73,6 +97,85 @@ void WatchFaceManager::update()
         // Update the active watch face every frame.
         _watch_faces[_current_index]->onUpdate();
     }
+}
+
+void WatchFaceManager::update_orientation()
+{
+    if (_panel == nullptr) {
+        return;
+    }
+
+    const uint32_t now = GetHAL().millis();
+    if (_orientation_last_tick != 0 &&
+        now - _orientation_last_tick < _orientation_period_ms) {
+        return;
+    }
+    _orientation_last_tick = now;
+
+    GetHAL().updateImuData();
+    const auto& imu = GetHAL().getImuData();
+
+    float accel_x = imu.accelX;
+    float accel_y = imu.accelY;
+    const float planar_magnitude = std::sqrt(accel_x * accel_x + accel_y * accel_y);
+
+    // When the display is close to face-up/face-down, gravity has too little
+    // X/Y projection to define a trustworthy in-plane orientation. Keep the
+    // last valid orientation instead of amplifying sensor noise.
+    if (!std::isfinite(planar_magnitude) ||
+        planar_magnitude < _orientation_min_planar_g) {
+        return;
+    }
+
+    accel_x /= planar_magnitude;
+    accel_y /= planar_magnitude;
+
+    if (!_orientation_initialized) {
+        _orientation_filtered_x = accel_x;
+        _orientation_filtered_y = accel_y;
+        _orientation_initialized = true;
+    } else {
+        _orientation_filtered_x +=
+            (accel_x - _orientation_filtered_x) * _orientation_filter_alpha;
+        _orientation_filtered_y +=
+            (accel_y - _orientation_filtered_y) * _orientation_filter_alpha;
+    }
+
+    const float filtered_magnitude =
+        std::sqrt(_orientation_filtered_x * _orientation_filtered_x +
+                  _orientation_filtered_y * _orientation_filtered_y);
+    if (filtered_magnitude < 1.0e-4f) {
+        return;
+    }
+
+    const float desired_angle =
+        std::atan2(_orientation_filtered_x, -_orientation_filtered_y) *
+        _radians_to_degrees;
+
+    float delta = desired_angle - _orientation_angle_degrees;
+    while (delta > 180.0f) {
+        delta -= 360.0f;
+    }
+    while (delta < -180.0f) {
+        delta += 360.0f;
+    }
+
+    if (std::fabs(delta) < _orientation_deadband_degrees) {
+        return;
+    }
+
+    _orientation_angle_degrees += delta;
+    while (_orientation_angle_degrees > 180.0f) {
+        _orientation_angle_degrees -= 360.0f;
+    }
+    while (_orientation_angle_degrees < -180.0f) {
+        _orientation_angle_degrees += 360.0f;
+    }
+
+    lv_obj_set_style_transform_rotation(
+        _panel->get(),
+        static_cast<int32_t>(std::lround(_orientation_angle_degrees * 10.0f)),
+        LV_PART_MAIN);
 }
 
 void WatchFaceManager::goNext()
@@ -128,8 +231,9 @@ void WatchFaceManager::update_gesture()
     if (is_pressed) {
         if (!_gesture_pressing) {
             // Start tracking from the first pressed point.
-            _gesture_pressing    = true;
-            _gesture_start_point = point;
+            _gesture_pressing                  = true;
+            _gesture_start_point               = point;
+            _gesture_start_orientation_degrees = _orientation_angle_degrees;
         }
 
         _gesture_last_point = point;
@@ -142,10 +246,23 @@ void WatchFaceManager::update_gesture()
 
     _gesture_pressing = false;
 
-    int delta_x = _gesture_last_point.x - _gesture_start_point.x;
-    int delta_y = _gesture_last_point.y - _gesture_start_point.y;
-    int abs_x   = delta_x >= 0 ? delta_x : -delta_x;
-    int abs_y   = delta_y >= 0 ? delta_y : -delta_y;
+    const float raw_delta_x =
+        static_cast<float>(_gesture_last_point.x - _gesture_start_point.x);
+    const float raw_delta_y =
+        static_cast<float>(_gesture_last_point.y - _gesture_start_point.y);
+
+    // Convert the physical-screen gesture back into the rotated watch-face
+    // coordinate system so "horizontal" continues to mean horizontal to the
+    // user regardless of device orientation.
+    const float radians = _gesture_start_orientation_degrees * _degrees_to_radians;
+    const float cosine = std::cos(radians);
+    const float sine = std::sin(radians);
+    const int delta_x = static_cast<int>(std::lround(
+        cosine * raw_delta_x + sine * raw_delta_y));
+    const int delta_y = static_cast<int>(std::lround(
+        -sine * raw_delta_x + cosine * raw_delta_y));
+    const int abs_x = delta_x >= 0 ? delta_x : -delta_x;
+    const int abs_y = delta_y >= 0 ? delta_y : -delta_y;
 
     // Only handle clear horizontal swipes.
     if (abs_x < _gesture_min_distance || abs_x <= abs_y) {
