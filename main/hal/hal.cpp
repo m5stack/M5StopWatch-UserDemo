@@ -44,6 +44,7 @@ void Hal::init()
     rtc_init();
     button_init();
     fs_init();
+    wifi_init();
 }
 
 /* -------------------------------------------------------------------------- */
@@ -67,6 +68,7 @@ std::uint32_t Hal::millis()
 
 void Hal::feedTheDog()
 {
+    wifi_tick();
     vTaskDelay(1);
 }
 

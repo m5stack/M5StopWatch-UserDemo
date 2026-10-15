@@ -89,6 +89,23 @@ private:
  * @brief
  *
  */
+class WifiWorker : public WorkerBase {
+public:
+    WifiWorker();
+    ~WifiWorker();
+    void update() override;
+
+private:
+    class WifiConfigView;
+
+    std::unique_ptr<WifiConfigView> _view;
+    Hal::WifiStatus _last_status;
+};
+
+/**
+ * @brief
+ *
+ */
 class SetTimeWorker : public WorkerBase {
 public:
     SetTimeWorker();

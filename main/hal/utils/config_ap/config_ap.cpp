@@ -151,12 +151,10 @@ private:
 
     bool start_access_point()
     {
-        static esp_netif_t* ap_netif = nullptr;
-
-        if (ap_netif == nullptr) {
-            ap_netif = esp_netif_create_default_wifi_ap();
+        if (_ap_netif == nullptr) {
+            _ap_netif = esp_netif_create_default_wifi_ap();
         }
-        if (ap_netif == nullptr) {
+        if (_ap_netif == nullptr) {
             log("Failed to create AP network interface");
             return false;
         }
@@ -165,9 +163,9 @@ private:
         IP4_ADDR(&ip_info.ip, 192, 168, 4, 1);
         IP4_ADDR(&ip_info.gw, 192, 168, 4, 1);
         IP4_ADDR(&ip_info.netmask, 255, 255, 255, 0);
-        esp_netif_dhcps_stop(ap_netif);
-        esp_netif_set_ip_info(ap_netif, &ip_info);
-        esp_netif_dhcps_start(ap_netif);
+        esp_netif_dhcps_stop(_ap_netif);
+        esp_netif_set_ip_info(_ap_netif, &ip_info);
+        esp_netif_dhcps_start(_ap_netif);
 
         _dns_server = std::make_unique<DnsServer>();
         _dns_server->Start(ip_info.gw);
@@ -327,6 +325,11 @@ private:
         esp_err_t ret = esp_wifi_stop();
         if (ret != ESP_OK && ret != ESP_ERR_WIFI_NOT_STARTED && ret != ESP_ERR_WIFI_MODE) {
             ESP_LOGW(_tag, "wifi stop failed: %s", esp_err_to_name(ret));
+        }
+
+        if (_ap_netif != nullptr) {
+            esp_netif_destroy_default_wifi(_ap_netif);
+            _ap_netif = nullptr;
         }
 
         if (_event_group != nullptr) {
@@ -573,6 +576,7 @@ private:
     Callbacks _callbacks;
     std::string _ssid;
     std::unique_ptr<DnsServer> _dns_server;
+    esp_netif_t* _ap_netif = nullptr;
 };
 
 }  // namespace

@@ -92,10 +92,55 @@ private:
 
 namespace status_bar_view {
 
+constexpr int _module_y_ofs            = 8;
+constexpr int _wifi_icon_x_ofs         = -51;
+constexpr int _battery_icon_x_ofs      = -12;
+constexpr int _battery_level_x_ofs     = 39;
+constexpr int _battery_level_width     = 44;
+
 class Widget {
 public:
     virtual ~Widget()     = default;
     virtual void update() = 0;
+};
+
+class WifiIndicator : public Widget {
+public:
+    WifiIndicator(lv_obj_t* parent, uint32_t colorPrimary)
+    {
+        _icon = std::make_unique<Label>(parent);
+        _icon->setText(LV_SYMBOL_WIFI);
+        _icon->setTextFont(&lv_font_montserrat_16);
+        _icon->setTextColor(lv_color_hex(colorPrimary));
+        _icon->align(LV_ALIGN_CENTER, _wifi_icon_x_ofs, _module_y_ofs);
+
+        update();
+    }
+
+    void update() override
+    {
+        const auto status = GetHAL().getWifiStatus();
+
+        switch (status.mode) {
+        case Hal::WifiMode::Connected:
+            _icon->setHidden(false);
+            _icon->setOpa(LV_OPA_COVER);
+            break;
+        case Hal::WifiMode::Connecting:
+        case Hal::WifiMode::ConfigAp:
+        case Hal::WifiMode::BadgeAp:
+            _icon->setHidden(false);
+            _icon->setOpa(LV_OPA_50);
+            break;
+        case Hal::WifiMode::Off:
+        case Hal::WifiMode::Error:
+            _icon->setHidden(true);
+            break;
+        }
+    }
+
+private:
+    std::unique_ptr<Label> _icon;
 };
 
 class BatteryIcon {
@@ -169,14 +214,16 @@ class Battery : public Widget {
 public:
     Battery(lv_obj_t* parent, uint32_t colorSecondary, uint32_t colorPrimary)
     {
+        _battery_icon = std::make_unique<BatteryIcon>(parent, colorSecondary, colorPrimary);
+        _battery_icon->align(LV_ALIGN_CENTER, _battery_icon_x_ofs, _module_y_ofs);
+
         _label_level = std::make_unique<Label>(parent);
         _label_level->setText("");
         _label_level->setTextColor(lv_color_hex(colorPrimary));
         _label_level->setTextFont(&lv_font_montserrat_16);
-        _label_level->align(LV_ALIGN_RIGHT_MID, -78, 8);
-
-        _battery_icon = std::make_unique<BatteryIcon>(parent, colorSecondary, colorPrimary);
-        _battery_icon->align(LV_ALIGN_RIGHT_MID, -43, 8);
+        _label_level->setWidth(_battery_level_width);
+        _label_level->setTextAlign(LV_TEXT_ALIGN_LEFT);
+        _label_level->align(LV_ALIGN_CENTER, _battery_level_x_ofs, _module_y_ofs);
 
         update();
     }
@@ -209,6 +256,7 @@ public:
         _panel->removeFlag(LV_OBJ_FLAG_SCROLLABLE);
         _panel->onClick().connect([this]() { hide(); });
 
+        _widgets.push_back(std::make_unique<WifiIndicator>(_panel->get(), colorPrimary));
         _widgets.push_back(std::make_unique<Battery>(_panel->get(), colorSecondary, colorPrimary));
 
         _panel->setPos(0, _pos_y_hide);

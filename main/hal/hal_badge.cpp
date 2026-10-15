@@ -498,6 +498,7 @@ void Hal::startBadgeEditModeViaAp(std::function<void(std::string_view)> onLog)
         return;
     }
 
+    wifi_enter_badge_ap();
     badge::config_ap::run(onLog, {
                                      .onUpload    = save_badge_upload,
                                      .onGetState  = make_badge_state,
@@ -505,4 +506,5 @@ void Hal::startBadgeEditModeViaAp(std::function<void(std::string_view)> onLog)
                                      .onSetActive = set_active_badge_slot,
                                      .onDelete    = delete_badge_slot,
                                  });
+    wifi_exit_badge_ap();
 }

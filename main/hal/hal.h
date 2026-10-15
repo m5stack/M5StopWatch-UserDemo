@@ -251,6 +251,33 @@ public:
     void setButtonConfig(ButtonConfig config, bool saveToSettings = false);
     const ButtonConfig& getButtonConfig(bool loadFromSettings = false);
 
+    /* ---------------------------------- Wi-Fi --------------------------------- */
+    enum class WifiMode {
+        Off,
+        Connecting,
+        Connected,
+        ConfigAp,
+        BadgeAp,
+        Error,
+    };
+
+    struct WifiStatus {
+        bool enabled    = false;
+        WifiMode mode   = WifiMode::Off;
+        bool connected  = false;
+        bool configMode = false;
+        bool badgeMode  = false;
+        std::string ssid;
+        std::string ipAddress;
+        std::string apSsid;
+        std::string apUrl;
+        std::string message;
+    };
+
+    void setWifiEnabled(bool enabled, bool saveToSettings = true);
+    bool isWifiEnabled(bool loadFromSettings = false);
+    WifiStatus getWifiStatus();
+
     /* ---------------------------------- Badge --------------------------------- */
     bool loadBadgeImage(lv_obj_t* image);
     bool loadNextBadgeImage(lv_obj_t* image);
@@ -285,6 +312,10 @@ private:
     void rtc_init();
     void button_init();
     void fs_init();
+    void wifi_init();
+    void wifi_tick();
+    void wifi_enter_badge_ap();
+    void wifi_exit_badge_ap();
 };
 
 Hal& GetHAL();

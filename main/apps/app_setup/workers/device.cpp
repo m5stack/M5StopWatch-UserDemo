@@ -9,6 +9,7 @@
 #include <hal/hal.h>
 #include <cstdint>
 #include <cstdio>
+#include <string>
 #include <vector>
 
 using namespace smooth_ui_toolkit::lvgl_cpp;
@@ -228,6 +229,160 @@ private:
     bool _save_requested = false;
 };
 
+class WifiWorker::WifiConfigView {
+public:
+    explicit WifiConfigView(const Hal::WifiStatus& initialStatus)
+    {
+        _panel = std::make_unique<Container>(lv_screen_active());
+        _panel->align(LV_ALIGN_CENTER, 0, 0);
+        _panel->setSize(466, 466);
+        _panel->setRadius(0);
+        _panel->setBorderWidth(0);
+        _panel->setPaddingAll(0);
+        _panel->setBgColor(lv_color_hex(0x000000));
+        _panel->setBgOpa(LV_OPA_COVER);
+        _panel->removeFlag(LV_OBJ_FLAG_SCROLLABLE);
+
+        _title_label = std::make_unique<Label>(_panel->get());
+        _title_label->setText("Wi-Fi");
+        _title_label->setTextFont(&MontserratSemiBold26);
+        _title_label->setTextColor(lv_color_hex(0xFFFFFF));
+        _title_label->align(LV_ALIGN_TOP_MID, 0, 52);
+
+        _row = std::make_unique<Container>(_panel->get());
+        _row->setSize(374, 119);
+        _row->align(LV_ALIGN_TOP_MID, 0, 100);
+        _row->setBgColor(lv_color_hex(0x4C4C4C));
+        _row->setBorderWidth(0);
+        _row->setShadowWidth(0);
+        _row->setRadius(60);
+        _row->setPaddingAll(0);
+        _row->setBgOpa(LV_OPA_TRANSP);
+
+        _switch_label = std::make_unique<Label>(_row->get());
+        _switch_label->setText("Wi-Fi");
+        _switch_label->setTextFont(&lv_font_montserrat_24);
+        _switch_label->setTextColor(lv_color_hex(0xFFFFFF));
+        _switch_label->align(LV_ALIGN_LEFT_MID, 36, 0);
+
+        _switch_widget = std::make_unique<Switch>(_row->get());
+        _switch_widget->setSize(80, 44);
+        _switch_widget->align(LV_ALIGN_RIGHT_MID, -36, 0);
+        _switch_widget->setValue(initialStatus.enabled);
+        _switch_widget->setBgColor(lv_color_hex(0x3A3A3A), LV_PART_MAIN);
+        _switch_widget->setBgOpa(LV_OPA_COVER, LV_PART_MAIN);
+        _switch_widget->setBorderWidth(0, LV_PART_MAIN);
+        _switch_widget->setRadius(LV_RADIUS_CIRCLE, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(_switch_widget->get(), lv_color_hex(0xFFFFFF), LV_PART_KNOB);
+        lv_obj_set_style_bg_opa(_switch_widget->get(), LV_OPA_COVER, LV_PART_KNOB);
+        lv_obj_set_style_border_width(_switch_widget->get(), 0, LV_PART_KNOB);
+        lv_obj_set_style_radius(_switch_widget->get(), LV_RADIUS_CIRCLE, LV_PART_KNOB);
+        _switch_widget->setBgColor(lv_color_hex(0x53BD65), LV_PART_INDICATOR | LV_STATE_CHECKED);
+        _switch_widget->setBgOpa(LV_OPA_COVER, LV_PART_INDICATOR | LV_STATE_CHECKED);
+        _switch_widget->setBorderWidth(0, LV_PART_INDICATOR | LV_STATE_CHECKED);
+        _switch_widget->onValueChanged().connect([this](bool enabled) {
+            if (_syncing_switch) {
+                return;
+            }
+            _pending_enabled = enabled;
+            _has_pending     = true;
+        });
+
+        _status_label = std::make_unique<Label>(_panel->get());
+        _status_label->setTextFont(&lv_font_montserrat_22);
+        _status_label->setTextColor(lv_color_hex(0xD0D0D0));
+        _status_label->setWidth(360);
+        _status_label->setTextAlign(LV_TEXT_ALIGN_CENTER);
+        _status_label->setLongMode(LV_LABEL_LONG_MODE_WRAP);
+        _status_label->align(LV_ALIGN_CENTER, 0, 30);
+
+        _ok_button = std::make_unique<Button>(_panel->get());
+        _ok_button->align(LV_ALIGN_CENTER, 0, 175);
+        _ok_button->setSize(374, 130);
+        _ok_button->setRadius(77);
+        _ok_button->setBorderWidth(0);
+        _ok_button->setShadowWidth(0);
+        _ok_button->setBgColor(lv_color_hex(0x4AD78C));
+        _ok_button->label().setText("OK");
+        _ok_button->label().setTextFont(&lv_font_montserrat_28);
+        _ok_button->label().setTextColor(lv_color_hex(0x0F5831));
+        _ok_button->label().align(LV_ALIGN_CENTER, 0, 0);
+        _ok_button->onClick().connect([this]() { _done_requested = true; });
+
+        updateStatus(initialStatus);
+    }
+
+    bool consumeEnabledChange(bool& enabled)
+    {
+        if (!_has_pending) {
+            return false;
+        }
+        enabled      = _pending_enabled;
+        _has_pending = false;
+        return true;
+    }
+
+    bool consumeDoneRequested()
+    {
+        bool requested  = _done_requested;
+        _done_requested = false;
+        return requested;
+    }
+
+    void updateStatus(const Hal::WifiStatus& status)
+    {
+        if (_switch_widget) {
+            _syncing_switch = true;
+            _switch_widget->setValue(status.enabled);
+            _syncing_switch = false;
+        }
+
+        if (!_status_label) {
+            return;
+        }
+
+        _status_label->setText(buildStatusText(status));
+    }
+
+private:
+    std::string buildStatusText(const Hal::WifiStatus& status) const
+    {
+        switch (status.mode) {
+        case Hal::WifiMode::Off:
+            return "Off";
+        case Hal::WifiMode::Connecting:
+            if (!status.ssid.empty()) {
+                return "Connecting\n" + status.ssid;
+            }
+            return status.message.empty() ? "Connecting" : status.message;
+        case Hal::WifiMode::Connected:
+            if (!status.ipAddress.empty()) {
+                return "Connected\n" + status.ssid + "\n" + status.ipAddress;
+            }
+            return "Connected\n" + status.ssid;
+        case Hal::WifiMode::ConfigAp:
+            return "Setup AP\n" + status.apSsid + "\n192.168.4.1";
+        case Hal::WifiMode::BadgeAp:
+            return "Badge AP active";
+        case Hal::WifiMode::Error:
+            return status.message.empty() ? "Wi-Fi error" : status.message;
+        }
+        return status.message;
+    }
+
+    std::unique_ptr<Container> _panel;
+    std::unique_ptr<Label> _title_label;
+    std::unique_ptr<Container> _row;
+    std::unique_ptr<Label> _switch_label;
+    std::unique_ptr<Switch> _switch_widget;
+    std::unique_ptr<Label> _status_label;
+    std::unique_ptr<Button> _ok_button;
+    bool _syncing_switch = false;
+    bool _pending_enabled = false;
+    bool _has_pending = false;
+    bool _done_requested = false;
+};
+
 }  // namespace setup_workers
 
 BrightnessWorker::BrightnessWorker()
@@ -303,5 +458,35 @@ void ButtonWorker::update()
 }
 
 ButtonWorker::~ButtonWorker()
+{
+}
+
+WifiWorker::WifiWorker()
+{
+    mclog::tagInfo(_tag, "start wifi worker");
+
+    _last_status = GetHAL().getWifiStatus();
+    _view        = std::make_unique<WifiConfigView>(_last_status);
+}
+
+void WifiWorker::update()
+{
+    if (_view) {
+        bool enabled = false;
+        if (_view->consumeEnabledChange(enabled)) {
+            GetHAL().setWifiEnabled(enabled, true);
+        }
+
+        const auto status = GetHAL().getWifiStatus();
+        _view->updateStatus(status);
+        _last_status = status;
+
+        if (_view->consumeDoneRequested()) {
+            _is_done = true;
+        }
+    }
+}
+
+WifiWorker::~WifiWorker()
 {
 }
